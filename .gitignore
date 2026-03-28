@@ -30,3 +30,4 @@ Thumbs.db
 # Firebase service account (절대 커밋 금지!)
 serviceAccountKey.json
 *serviceAccount*.json
+*firebase-adminsdk*.json

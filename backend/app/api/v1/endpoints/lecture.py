@@ -4,11 +4,14 @@ from app.schemas.schemas import (
     LectureUploadRequest, LectureUploadResponse,
     TeacherCreate, TeacherResponse,
     TranscribeRequest, TranscribeResponse,
+    ClassifyRequest, ClassifyResponse,
+    LessonContentResult, StudentRecordItem, NoticeItem,
 )
 from app.services.ai_service import (
     generate_lesson_full_content,
     transcribe_lesson_audio,
     extract_student_issues,
+    classify_lesson_recording,
 )
 from datetime import date
 import uuid
@@ -170,3 +173,70 @@ async def transcribe_lecture(body: TranscribeRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"전사 실패: {str(e)}")
+
+
+@router.post("/classify", response_model=ClassifyResponse)
+async def classify_lecture(body: ClassifyRequest):
+    """수업 녹음(base64 audio) → AI 3분류: ① 학습 콘텐츠 / ② 학생 생활 기록 / ③ 공지·알림"""
+    db = get_db()
+    today = date.today().isoformat()
+
+    try:
+        result = await classify_lesson_recording(
+            audio_base64=body.audio_base64,
+            grade=body.grade,
+            subject=body.subject,
+        )
+
+        classify_id = str(uuid.uuid4())
+
+        # ① 학습 콘텐츠 저장
+        lc = result.get("lesson_content", {})
+        if lc.get("has_content"):
+            db.collection("lesson_drafts").document(classify_id).set({
+                "draft_id": classify_id,
+                "teacher_id": body.teacher_id,
+                "subject": body.subject,
+                "grade": body.grade,
+                "date": today,
+                "topic": lc.get("topic", ""),
+                "summary": lc.get("summary", ""),
+                "core_concepts": lc.get("core_concepts", []),
+                "raw_text": lc.get("raw_text", ""),
+            })
+
+        # ② 학생 생활 기록 저장
+        for record in result.get("student_records", []):
+            rec_id = str(uuid.uuid4())
+            db.collection("student_records_draft").document(rec_id).set({
+                "record_id": rec_id,
+                "teacher_id": body.teacher_id,
+                "date": today,
+                "student_name": record.get("student_name", "미상"),
+                "type": record.get("type", "other"),
+                "summary": record.get("summary", ""),
+                "detail": record.get("detail", ""),
+            })
+
+        # ③ 공지·알림 저장
+        for notice in result.get("notices", []):
+            notice_id = str(uuid.uuid4())
+            db.collection("notice_drafts").document(notice_id).set({
+                "notice_id": notice_id,
+                "teacher_id": body.teacher_id,
+                "subject": body.subject,
+                "date": today,
+                "type": notice.get("type", "other"),
+                "summary": notice.get("summary", ""),
+                "detail": notice.get("detail", ""),
+                "target": notice.get("target", "students"),
+            })
+
+        return ClassifyResponse(
+            classify_id=classify_id,
+            lesson_content=LessonContentResult(**lc) if lc else LessonContentResult(has_content=False),
+            student_records=[StudentRecordItem(**r) for r in result.get("student_records", [])],
+            notices=[NoticeItem(**n) for n in result.get("notices", [])],
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"분류 실패: {str(e)}")

@@ -145,6 +145,42 @@ class ParentDashboardResponse(BaseModel):
 
 # ─── Teacher ──────────────────────────────────────────────────────────────
 
+# ─── Recording Classification ─────────────────────────────────────────────
+
+class ClassifyRequest(BaseModel):
+    teacher_id: str
+    grade: int
+    subject: str
+    audio_base64: str
+
+class LessonContentResult(BaseModel):
+    has_content: bool
+    topic: str = ""
+    summary: str = ""
+    core_concepts: List[str] = []
+    raw_text: str = ""
+
+class StudentRecordItem(BaseModel):
+    student_name: str
+    type: str
+    summary: str
+    detail: str = ""
+
+class NoticeItem(BaseModel):
+    type: str
+    summary: str
+    detail: str = ""
+    target: str = "students"
+
+class ClassifyResponse(BaseModel):
+    classify_id: str
+    lesson_content: LessonContentResult
+    student_records: List[StudentRecordItem] = []
+    notices: List[NoticeItem] = []
+
+
+# ─── Teacher ──────────────────────────────────────────────────────────────
+
 class TeacherCreate(BaseModel):
     name: str
     school: Optional[str] = None

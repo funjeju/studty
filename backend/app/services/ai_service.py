@@ -390,6 +390,69 @@ JSON 형식으로만 응답해주세요:
         return []
 
 
+async def classify_lesson_recording(audio_base64: str, grade: int, subject: str) -> Dict:
+    """수업 녹음을 분석해서 3가지 유형으로 분류: 학습 콘텐츠 / 학생 생활 기록 / 공지·알림"""
+    import base64
+    audio_data = base64.b64decode(audio_base64)
+    vision_model = genai.GenerativeModel("gemini-2.5-flash")
+    prompt = f"""이것은 한국 초등학교 {grade}학년 {subject} 수업 중 교사의 발화 녹음입니다.
+녹음 내용을 분석하여 세 가지 유형으로 분류해 주세요.
+
+JSON 형식으로만 응답해주세요:
+{{
+  "lesson_content": {{
+    "has_content": true,
+    "topic": "수업 주제 (없으면 빈 문자열)",
+    "summary": "학습 내용 요약 (없으면 빈 문자열)",
+    "core_concepts": ["핵심 개념1", "핵심 개념2"],
+    "raw_text": "학습 관련 전사 내용 (없으면 빈 문자열)"
+  }},
+  "student_records": [
+    {{
+      "student_name": "학생 이름 (불명확하면 '미상')",
+      "type": "praise | discipline | conflict | bullying | other",
+      "summary": "생활 기록 한 줄 요약",
+      "detail": "상세 내용"
+    }}
+  ],
+  "notices": [
+    {{
+      "type": "homework | preparation | event | parent_notice | other",
+      "summary": "공지 한 줄 요약",
+      "detail": "상세 내용",
+      "target": "students | parents | both"
+    }}
+  ]
+}}
+
+분류 기준:
+- lesson_content: 개념 설명, 문제 풀이, 학습 목표, 수업 내용 전반 → has_content=true
+- student_records: 특정 학생 칭찬/훈육/다툼/학폭/행동 특이사항 → 항목 추가
+- notices: 숙제, 준비물, 행사 안내, 학부모 전달사항 → 항목 추가
+- 해당 내용이 없으면 has_content=false 또는 빈 배열 반환
+- JSON만 반환
+"""
+    try:
+        response = vision_model.generate_content([
+            {"mime_type": "audio/webm", "data": audio_data},
+            prompt,
+        ])
+        result = json.loads(response.text)
+        if "lesson_content" not in result:
+            result["lesson_content"] = {"has_content": False, "topic": "", "summary": "", "core_concepts": [], "raw_text": ""}
+        if "student_records" not in result:
+            result["student_records"] = []
+        if "notices" not in result:
+            result["notices"] = []
+        return result
+    except Exception:
+        return {
+            "lesson_content": {"has_content": False, "topic": "", "summary": "", "core_concepts": [], "raw_text": ""},
+            "student_records": [],
+            "notices": [],
+        }
+
+
 async def analyze_image_concept(image_base64: str) -> Dict:
     vision_model = genai.GenerativeModel("gemini-2.5-flash")
     import base64

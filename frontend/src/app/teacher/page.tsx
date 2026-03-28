@@ -82,6 +82,19 @@ interface AiResult {
   vark_tips?: Record<string, string>;
 }
 
+interface ClassifyResult {
+  classify_id: string;
+  lesson_content: {
+    has_content: boolean;
+    topic: string;
+    summary: string;
+    core_concepts: string[];
+    raw_text: string;
+  };
+  student_records: Array<{ student_name: string; type: string; summary: string; detail: string }>;
+  notices: Array<{ type: string; summary: string; detail: string; target: string }>;
+}
+
 interface Recording {
   id: string;
   dateStr: string;
@@ -152,6 +165,10 @@ export default function TeacherPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── 녹음 3분류 ──
+  const [classifyLoading, setClassifyLoading] = useState(false);
+  const [classifyResult, setClassifyResult] = useState<ClassifyResult | null>(null);
 
   // ── 학생 관리 탭 ──
   const [roster, setRoster] = useState<StudentInfo[]>([]);
@@ -325,6 +342,32 @@ export default function TeacherPage() {
     } catch {
       updateRec(rec.id, { status: "ready" });
       toast.error("업로드 실패. 다시 시도하세요.");
+    }
+  };
+
+  const classifyAudio = async (file: File) => {
+    if (!user) return;
+    setClassifyLoading(true);
+    setClassifyResult(null);
+    try {
+      const base64: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await api.post("/lecture/classify", {
+        teacher_id: user.uid,
+        grade,
+        subject: uploadSubject,
+        audio_base64: base64,
+      });
+      setClassifyResult(res.data as ClassifyResult);
+      toast.success("AI 3분류 분석 완료!");
+    } catch {
+      toast.error("분석 실패. 다시 시도하세요.");
+    } finally {
+      setClassifyLoading(false);
     }
   };
 
@@ -609,6 +652,137 @@ export default function TeacherPage() {
                     </>
                   )}
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* ── 녹음 파일 업로드 & AI 3분류 ── */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Upload className="w-5 h-5 text-purple-600" />녹음 자료 업로드 &amp; AI 3분류 분석
+                </CardTitle>
+                <CardDescription>
+                  녹음 파일을 업로드하면 AI가 내용을 분석해 <strong>학습 콘텐츠 · 학생 생활 기록 · 공지·알림</strong> 3가지로 자동 분류·저장합니다.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Select value={uploadSubject} onValueChange={setUploadSubject}>
+                    <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+                    <SelectContent>{subjects.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <label className={`cursor-pointer ${classifyLoading ? "pointer-events-none" : ""}`}>
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      className="hidden"
+                      onChange={(e) => { if (e.target.files?.[0]) { classifyAudio(e.target.files[0]); e.target.value = ""; } }}
+                    />
+                    <span className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all ${classifyLoading ? "bg-slate-100 text-slate-400 border-slate-200" : "bg-purple-600 text-white border-purple-600 hover:bg-purple-700 cursor-pointer"}`}>
+                      {classifyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                      {classifyLoading ? "AI가 분석 중..." : "파일 선택 & AI 분석"}
+                    </span>
+                  </label>
+                  {classifyResult && !classifyLoading && (
+                    <span className="flex items-center gap-1 text-sm text-purple-600 font-medium">
+                      <CheckCircle2 className="w-4 h-4" />분류 완료 — 저장됨
+                    </span>
+                  )}
+                </div>
+
+                {classifyResult && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {/* ① 학습 콘텐츠 */}
+                    <div className={`rounded-xl border p-4 space-y-2 ${classifyResult.lesson_content.has_content ? "bg-blue-50 border-blue-200" : "bg-slate-50 border-slate-200"}`}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">📚</span>
+                        <span className="text-sm font-semibold text-blue-800">학습 콘텐츠</span>
+                        {classifyResult.lesson_content.has_content
+                          ? <Badge className="ml-auto bg-blue-600 text-white text-xs hover:bg-blue-600">감지됨</Badge>
+                          : <Badge variant="secondary" className="ml-auto text-xs">없음</Badge>}
+                      </div>
+                      {classifyResult.lesson_content.has_content ? (
+                        <div className="space-y-1.5">
+                          {classifyResult.lesson_content.topic && <p className="text-xs font-semibold text-slate-700">{classifyResult.lesson_content.topic}</p>}
+                          {classifyResult.lesson_content.summary && <p className="text-xs text-slate-600 leading-relaxed">{classifyResult.lesson_content.summary}</p>}
+                          {classifyResult.lesson_content.core_concepts.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {classifyResult.lesson_content.core_concepts.map((c) => (
+                                <Badge key={c} variant="outline" className="text-xs border-blue-300 text-blue-700">{c}</Badge>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400">이 녹음에서 학습 관련 내용이 감지되지 않았습니다.</p>
+                      )}
+                    </div>
+
+                    {/* ② 학생 생활 기록 */}
+                    <div className={`rounded-xl border p-4 space-y-2 ${classifyResult.student_records.length > 0 ? "bg-amber-50 border-amber-200" : "bg-slate-50 border-slate-200"}`}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">📋</span>
+                        <span className="text-sm font-semibold text-amber-800">학생 생활 기록</span>
+                        {classifyResult.student_records.length > 0
+                          ? <Badge className="ml-auto bg-amber-500 text-white text-xs hover:bg-amber-500">{classifyResult.student_records.length}건</Badge>
+                          : <Badge variant="secondary" className="ml-auto text-xs">없음</Badge>}
+                      </div>
+                      {classifyResult.student_records.length > 0 ? (
+                        <ul className="space-y-2">
+                          {classifyResult.student_records.map((r, i) => {
+                            const typeInfo = ISSUE_TYPE_LABELS[r.type] || ISSUE_TYPE_LABELS.other;
+                            return (
+                              <li key={i} className="text-xs space-y-0.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-semibold text-slate-700">{r.student_name}</span>
+                                  <span className={`px-1.5 py-0.5 rounded-full text-xs font-medium ${typeInfo.color}`}>{typeInfo.label}</span>
+                                </div>
+                                <p className="text-slate-600">{r.summary}</p>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-slate-400">이 녹음에서 학생 생활 기록 관련 내용이 감지되지 않았습니다.</p>
+                      )}
+                    </div>
+
+                    {/* ③ 공지·알림 */}
+                    <div className={`rounded-xl border p-4 space-y-2 ${classifyResult.notices.length > 0 ? "bg-green-50 border-green-200" : "bg-slate-50 border-slate-200"}`}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">📢</span>
+                        <span className="text-sm font-semibold text-green-800">공지·알림</span>
+                        {classifyResult.notices.length > 0
+                          ? <Badge className="ml-auto bg-green-600 text-white text-xs hover:bg-green-600">{classifyResult.notices.length}건</Badge>
+                          : <Badge variant="secondary" className="ml-auto text-xs">없음</Badge>}
+                      </div>
+                      {classifyResult.notices.length > 0 ? (
+                        <ul className="space-y-2">
+                          {classifyResult.notices.map((n, i) => {
+                            const noticeTypeLabel: Record<string, string> = {
+                              homework: "숙제", preparation: "준비물", event: "행사",
+                              parent_notice: "학부모 공지", other: "기타",
+                            };
+                            const targetLabel: Record<string, string> = {
+                              students: "학생", parents: "학부모", both: "전체",
+                            };
+                            return (
+                              <li key={i} className="text-xs space-y-0.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-semibold text-slate-700">{noticeTypeLabel[n.type] || "기타"}</span>
+                                  <span className="text-slate-400">→ {targetLabel[n.target] || n.target}</span>
+                                </div>
+                                <p className="text-slate-600">{n.summary}</p>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-slate-400">이 녹음에서 공지·알림 관련 내용이 감지되지 않았습니다.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
