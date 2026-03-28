@@ -26,3 +26,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Firebase service account (절대 커밋 금지!)
+serviceAccountKey.json
+*serviceAccount*.json
